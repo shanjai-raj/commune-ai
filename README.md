@@ -1,9 +1,26 @@
-# commune-ai
+# TypeScript SDK for Email & SMS in AI Agents
 
-Email infrastructure for agents — set up an inbox and send your first email in 30 seconds. Programmatic inboxes (~1 line), consistent threads, setup and verify custom domains, send and receive attachments, structured data extraction.
+[![npm](https://img.shields.io/npm/v/commune-ai?color=blue&label=npm)](https://www.npmjs.com/package/commune-ai)
+[![Node.js 18+](https://img.shields.io/badge/node-18%2B-blue)](https://www.npmjs.com/package/commune-ai)
+[![MIT License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![commune.email](https://img.shields.io/badge/docs-commune.email-blue)](https://commune.email)
+
+Give your TypeScript/Node.js agent a real inbox. Send email, receive webhooks, manage threads — in 4 lines.
 
 ```bash
 npm install commune-ai
+```
+
+```typescript
+import { CommuneClient } from 'commune-ai';
+
+const commune = new CommuneClient({ apiKey: 'comm_...' });
+await commune.messages.send({
+  to: 'user@example.com',
+  subject: 'From your agent',
+  text: 'Task complete.',
+  inboxId: 'agent@yourdomain.com'
+});
 ```
 
 ## Table of Contents
