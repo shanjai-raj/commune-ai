@@ -18,10 +18,33 @@ import type {
   Thread,
   ThreadListParams,
   ThreadListResponse,
+  SearchThreadsParams,
+  SearchThreadResult,
+  ThreadMetadataEntry,
+  DeliveryMetricsParams,
+  DeliveryEventEntry,
+  DeliveryEventsParams,
+  DeliverySuppressionsParams,
+  SuppressionEntry,
+  PhoneNumber,
+  UpdatePhoneNumberPayload,
+  PhoneNumberWebhookPayload,
+  AvailablePhoneNumber,
+  ProvisionPhoneNumberPayload,
+  SmsConversation,
+  SmsConversationListParams,
+  SmsMessage,
+  SmsListParams,
+  SmsSuppression,
+  SendSmsPayload,
+  SendSmsResult,
+  SmsSearchParams,
+  CreditBalance,
+  CreditBundle,
+  CreditCheckoutResult,
 } from './types.js';
-import { SearchClient } from './client/search.js';
 
-const DEFAULT_BASE_URL = 'https://web-production-3f46f.up.railway.app';
+const DEFAULT_BASE_URL = 'https://api.commune.email';
 
 export type ClientOptions = {
   baseUrl?: string;
@@ -43,18 +66,23 @@ const buildQuery = (params: Record<string, string | number | undefined>) => {
 };
 
 export class CommuneClient {
-  private searchClient: SearchClient;
   private baseUrl: string;
   private apiKey: string;
   private headers?: Record<string, string>;
   private fetcher: typeof fetch;
+  private deprecationWarnings = new Set<string>();
 
   constructor(options: ClientOptions) {
     this.baseUrl = (options.baseUrl || DEFAULT_BASE_URL).replace(/\/$/, '');
     this.apiKey = options.apiKey;
     this.headers = options.headers;
     this.fetcher = options.fetcher || fetch;
-    this.searchClient = new SearchClient(this.baseUrl, { Authorization: `Bearer ${this.apiKey}` });
+  }
+
+  private warnDeprecated(key: string, message: string) {
+    if (this.deprecationWarnings.has(key)) return;
+    this.deprecationWarnings.add(key);
+    console.warn(message);
   }
 
   private async request<T>(
@@ -126,27 +154,68 @@ export class CommuneClient {
   };
 
   inboxes = {
-    list: async (domainId: string) => {
-      return this.request<InboxEntry[]>(
-        `/v1/domains/${encodeURIComponent(domainId)}/inboxes`
-      );
+    /**
+     * List inboxes.
+     *
+     * @param domainId - Optional domain ID to filter by. If omitted, lists all inboxes across all domains.
+     * @example
+     * // List all inboxes
+     * const allInboxes = await commune.inboxes.list();
+     *
+     * // List inboxes for a specific domain
+     * const domainInboxes = await commune.inboxes.list('domain-id');
+     */
+    list: async (domainId?: string) => {
+      if (domainId) {
+        return this.request<InboxEntry[]>(
+          `/v1/domains/${encodeURIComponent(domainId)}/inboxes`
+        );
+      }
+      return this.request<InboxEntry[]>(`/v1/inboxes`);
     },
+    /**
+     * Create a new inbox.
+     *
+     * @param payload - Inbox configuration
+     * @example
+     * // Simple creation with auto-resolved domain (recommended)
+     * const inbox = await commune.inboxes.create({
+     *   localPart: 'support',
+     * });
+     *
+     * // With explicit domain (for custom domains)
+     * const inbox = await commune.inboxes.create({
+     *   localPart: 'support',
+     *   domainId: 'my-domain-id',
+     * });
+     */
     create: async (
-      domainId: string,
       payload: {
         localPart: string;
+        domainId?: string;
         agent?: InboxEntry['agent'];
         webhook?: InboxEntry['webhook'];
         status?: string;
       }
     ) => {
-      return this.request<InboxEntry>(
-        `/v1/domains/${encodeURIComponent(domainId)}/inboxes`,
-        {
-          method: 'POST',
-          json: payload as Record<string, unknown>,
-        }
-      );
+      const { domainId, ...rest } = payload;
+
+      // If domainId provided, use domain-scoped endpoint for explicit control
+      if (domainId) {
+        return this.request<InboxEntry>(
+          `/v1/domains/${encodeURIComponent(domainId)}/inboxes`,
+          {
+            method: 'POST',
+            json: rest as Record<string, unknown>,
+          }
+        );
+      }
+
+      // Otherwise use simple auto-resolved endpoint
+      return this.request<InboxEntry>(`/v1/inboxes`, {
+        method: 'POST',
+        json: payload as Record<string, unknown>,
+      });
     },
     update: async (
       domainId: string,
@@ -238,19 +307,39 @@ export class CommuneClient {
     },
   };
 
+  search = {
+    threads: async (params: SearchThreadsParams) => {
+      return this.request<SearchThreadResult[]>(
+        `/v1/search/threads${buildQuery({
+          q: params.query,
+          inbox_id: params.inboxId,
+          domain_id: params.domainId,
+          limit: params.limit,
+        })}`
+      );
+    },
+  };
+
   conversations = {
     search: async (query: string, filter: SearchFilter, options?: SearchOptions) => {
-      return this.request<SearchResult[]>('/v1/search', {
-        method: 'POST',
-        json: {
-          query,
-          filter,
-          options,
-        },
-      });
+      this.warnDeprecated(
+        'conversations.search',
+        '[commune-ai] `conversations.search` is deprecated. Use `search.threads({ query, inboxId, domainId, limit })`.'
+      );
+      const inboxId = filter.inboxIds && filter.inboxIds.length > 0 ? filter.inboxIds[0] : undefined;
+      return this.search.threads({
+        query,
+        inboxId,
+        domainId: filter.domainId,
+        limit: options?.limit,
+      }) as unknown as SearchResult[];
     },
 
     index: async (organizationId: string, conversation: IndexConversationPayload) => {
+      this.warnDeprecated(
+        'conversations.index',
+        '[commune-ai] `conversations.index` is deprecated and will be removed. Indexing is handled automatically.'
+      );
       return this.request<{ success: boolean }>('/v1/search/index', {
         method: 'POST',
         json: {
@@ -261,6 +350,10 @@ export class CommuneClient {
     },
 
     indexBatch: async (organizationId: string, conversations: IndexConversationPayload[]) => {
+      this.warnDeprecated(
+        'conversations.indexBatch',
+        '[commune-ai] `conversations.indexBatch` is deprecated and will be removed. Indexing is handled automatically.'
+      );
       return this.request<{ success: boolean }>('/v1/search/index/batch', {
         method: 'POST',
         json: {
@@ -304,6 +397,82 @@ export class CommuneClient {
         })}`
       );
     },
+    metadata: async (threadId: string) => {
+      return this.request<ThreadMetadataEntry>(
+        `/v1/threads/${encodeURIComponent(threadId)}/metadata`
+      );
+    },
+    setStatus: async (
+      threadId: string,
+      status: 'open' | 'needs_reply' | 'waiting' | 'closed'
+    ) => {
+      return this.request<ThreadMetadataEntry>(
+        `/v1/threads/${encodeURIComponent(threadId)}/status`,
+        {
+          method: 'PUT',
+          json: { status },
+        }
+      );
+    },
+    addTags: async (threadId: string, tags: string[]) => {
+      return this.request<ThreadMetadataEntry>(
+        `/v1/threads/${encodeURIComponent(threadId)}/tags`,
+        {
+          method: 'POST',
+          json: { tags },
+        }
+      );
+    },
+    removeTags: async (threadId: string, tags: string[]) => {
+      return this.request<ThreadMetadataEntry>(
+        `/v1/threads/${encodeURIComponent(threadId)}/tags`,
+        {
+          method: 'DELETE',
+          json: { tags },
+        }
+      );
+    },
+    assign: async (threadId: string, assignedTo?: string | null) => {
+      return this.request<ThreadMetadataEntry>(
+        `/v1/threads/${encodeURIComponent(threadId)}/assign`,
+        {
+          method: 'PUT',
+          json: { assigned_to: assignedTo ?? null },
+        }
+      );
+    },
+  };
+
+  delivery = {
+    metrics: async (params: DeliveryMetricsParams = {}) => {
+      return this.request<Record<string, unknown>>(
+        `/v1/delivery/metrics${buildQuery({
+          inbox_id: params.inboxId,
+          domain_id: params.domainId,
+          period: params.period,
+        })}`
+      );
+    },
+    events: async (params: DeliveryEventsParams = {}) => {
+      return this.request<DeliveryEventEntry[]>(
+        `/v1/delivery/events${buildQuery({
+          message_id: params.messageId,
+          inbox_id: params.inboxId,
+          domain_id: params.domainId,
+          event_type: params.eventType,
+          limit: params.limit,
+        })}`
+      );
+    },
+    suppressions: async (params: DeliverySuppressionsParams = {}) => {
+      return this.request<SuppressionEntry[]>(
+        `/v1/delivery/suppressions${buildQuery({
+          inbox_id: params.inboxId,
+          domain_id: params.domainId,
+          limit: params.limit,
+        })}`
+      );
+    },
   };
 
   attachments = {
@@ -323,6 +492,134 @@ export class CommuneClient {
       return this.request<AttachmentRecord>(
         `/v1/attachments/${encodeURIComponent(attachmentId)}`
       );
+    },
+  };
+
+  phoneNumbers = {
+    list: async () => {
+      return this.request<PhoneNumber[]>('/v1/phone-numbers');
+    },
+    get: async (phoneNumberId: string) => {
+      return this.request<PhoneNumber>(`/v1/phone-numbers/${encodeURIComponent(phoneNumberId)}`);
+    },
+    update: async (phoneNumberId: string, payload: UpdatePhoneNumberPayload) => {
+      return this.request<PhoneNumber>(
+        `/v1/phone-numbers/${encodeURIComponent(phoneNumberId)}`,
+        { method: 'PATCH', json: payload as unknown as Record<string, unknown> }
+      );
+    },
+    available: async (params?: { type?: 'TollFree' | 'Local'; country?: string; area_code?: string; limit?: number }) => {
+      return this.request<AvailablePhoneNumber[]>(
+        `/v1/phone-numbers/available${buildQuery({
+          type: params?.type,
+          country: params?.country,
+          area_code: params?.area_code,
+          limit: params?.limit,
+        })}`
+      );
+    },
+    provision: async (payload?: ProvisionPhoneNumberPayload) => {
+      return this.request<PhoneNumber>('/v1/phone-numbers', {
+        method: 'POST',
+        json: (payload ?? {}) as unknown as Record<string, unknown>,
+      });
+    },
+    release: async (phoneNumberId: string) => {
+      return this.request<{ id: string; status: string; message: string }>(
+        `/v1/phone-numbers/${encodeURIComponent(phoneNumberId)}`,
+        { method: 'DELETE' }
+      );
+    },
+    setAllowList: async (phoneNumberId: string, numbers: string[]) => {
+      return this.request<PhoneNumber>(
+        `/v1/phone-numbers/${encodeURIComponent(phoneNumberId)}/allow-list`,
+        { method: 'PUT', json: { numbers } }
+      );
+    },
+    setBlockList: async (phoneNumberId: string, numbers: string[]) => {
+      return this.request<PhoneNumber>(
+        `/v1/phone-numbers/${encodeURIComponent(phoneNumberId)}/block-list`,
+        { method: 'PUT', json: { numbers } }
+      );
+    },
+    setWebhook: async (phoneNumberId: string, payload: PhoneNumberWebhookPayload) => {
+      return this.request<PhoneNumber>(
+        `/v1/phone-numbers/${encodeURIComponent(phoneNumberId)}`,
+        { method: 'PATCH', json: { webhook: payload } as unknown as Record<string, unknown> }
+      );
+    },
+  };
+
+  sms = {
+    list: async (params: SmsListParams = {}) => {
+      return this.request<SmsMessage[]>(
+        `/v1/sms${buildQuery({
+          phone_number_id: params.phone_number_id,
+          limit: params.limit,
+          before: params.before,
+          after: params.after,
+        })}`
+      );
+    },
+    send: async (payload: SendSmsPayload) => {
+      return this.request<SendSmsResult>('/v1/sms/send', {
+        method: 'POST',
+        json: payload as unknown as Record<string, unknown>,
+      });
+    },
+    conversations: async (params: SmsConversationListParams = {}) => {
+      return this.request<SmsConversation[]>(
+        `/v1/sms/conversations${buildQuery({
+          phone_number_id: params.phone_number_id,
+          limit: params.limit,
+          cursor: params.cursor,
+        })}`
+      );
+    },
+    thread: async (remoteNumber: string, phoneNumberId?: string) => {
+      return this.request<SmsMessage[]>(
+        `/v1/sms/conversations/${encodeURIComponent(remoteNumber)}${buildQuery({
+          phone_number_id: phoneNumberId,
+        })}`
+      );
+    },
+    search: async (params: SmsSearchParams) => {
+      return this.request<SmsMessage[]>(
+        `/v1/sms/search${buildQuery({
+          q: params.q,
+          phone_number_id: params.phone_number_id,
+          limit: params.limit,
+        })}`
+      );
+    },
+    suppressions: async (phoneNumberId?: string) => {
+      return this.request<SmsSuppression[]>(
+        `/v1/sms/suppressions${buildQuery({ phone_number_id: phoneNumberId })}`
+      );
+    },
+    removeSuppression: async (phoneNumber: string) => {
+      return this.request<{ removed: boolean; phone_number: string }>(
+        `/v1/sms/suppressions/${encodeURIComponent(phoneNumber)}`,
+        { method: 'DELETE' }
+      );
+    },
+  };
+
+  credits = {
+    balance: async () => {
+      return this.request<CreditBalance>('/v1/credits');
+    },
+    bundles: async () => {
+      return this.request<CreditBundle[]>('/v1/credits/bundles');
+    },
+    checkout: async (bundle: 'starter' | 'growth' | 'scale', returnUrl?: string) => {
+      return this.request<CreditCheckoutResult>('/v1/credits/checkout', {
+        method: 'POST',
+        json: {
+          bundle,
+          ...(returnUrl ? { success_url: returnUrl, cancel_url: returnUrl } : {}),
+        },
+      });
     },
   };
 }

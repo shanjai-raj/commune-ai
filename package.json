@@ -1,7 +1,7 @@
 {
   "name": "commune-ai",
-  "version": "0.2.66",
-  "description": "Email infrastructure for agents \u2014 set up an inbox and send your first email in 30 seconds. Programmatic inboxes (~1 line), consistent threads, custom domains, attachments, and structured data.",
+  "version": "0.3.5",
+  "description": "Email infrastructure for agents — set up an inbox and send your first email in 30 seconds. Programmatic inboxes (~1 line), consistent threads, custom domains, attachments, and structured data.",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -41,14 +41,14 @@
     "thread",
     "ai"
   ],
-  "license": "MIT",
+  "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "https://github.com/commune-ai/commune"
+    "url": "https://github.com/shanjai-raj/commune-ai"
   },
-  "homepage": "https://github.com/commune-ai/commune#readme",
+  "homepage": "https://github.com/shanjai-raj/commune-ai#readme",
   "bugs": {
-    "url": "https://github.com/commune-ai/commune/issues"
+    "url": "https://github.com/shanjai-raj/commune-ai/issues"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
